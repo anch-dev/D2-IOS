@@ -1,0 +1,54 @@
+name: iOS ARM64 Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ios-port]
+
+jobs:
+  build-ios:
+    runs-on: macos-14
+    steps:
+      - name: Checkout port harness
+        uses: actions/checkout@v4
+
+      - name: Checkout upstream Abyss Engine
+        uses: actions/checkout@v4
+        with:
+          repository: AbyssEngine/AbyssEngine
+          path: upstream
+
+      - name: Install build dependencies
+        run: |
+          brew install cmake ninja
+          brew install pkg-config ffmpeg libarchive sdl2
+
+      - name: Apply iOS port patch
+        run: python3 ios/patch_upstream.py upstream
+
+      - name: Configure iOS ARM64
+        run: |
+          cmake -S upstream -B build-ios -G Xcode             -DCMAKE_SYSTEM_NAME=iOS             -DCMAKE_OSX_SYSROOT=iphoneos             -DCMAKE_OSX_ARCHITECTURES=arm64             -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0             -DCMAKE_BUILD_TYPE=Release             -DGITHUB_ACTIONS=1
+
+      - name: Build
+        run: cmake --build build-ios --config Release -- -allowProvisioningUpdates CODE_SIGNING_ALLOWED=NO
+
+      - name: Locate app
+        run: |
+          find build-ios -name '*.app' -maxdepth 5 -print
+
+      - name: Package unsigned IPA
+        run: |
+          APP="$(find build-ios -name 'AbyssEngine.app' -type d | head -1)"
+          test -n "$APP"
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          /usr/bin/zip -qry "D2-IOS-unsigned.ipa" Payload
+          rm -rf Payload
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: D2-IOS-unsigned
+          path: D2-IOS-unsigned.ipa
+          if-no-files-found: error
